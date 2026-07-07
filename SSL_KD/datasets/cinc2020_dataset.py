@@ -97,7 +97,13 @@ class CINC2020Dataset(Dataset):
         return label
 
     def __getitem__(self, item):
-        record_path = os.path.join(self.data_dir, self.data[item])
+        raw_path = self.data[item].replace('\\', '/')
+        if 'training/' in raw_path:
+            relative_path = raw_path[raw_path.find('training/'):]
+        else:
+            relative_path = raw_path
+            
+        record_path = os.path.join(self.data_dir, relative_path)
         if record_path.endswith('.mat'):
             record_path = record_path[:-4]
         
