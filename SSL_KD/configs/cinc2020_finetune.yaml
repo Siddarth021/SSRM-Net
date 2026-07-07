@@ -1,0 +1,25 @@
+data:
+  dataset_name: cinc2020
+  data_dir: D:\Datasets\phsionet_2020\
+  score_path: D:\Datasets\phsionet_2020\dx_mapping_scored.csv
+  split: '0'
+  target_fs: 257
+  seq_length: 4096
+  lead2_sec: 15.94
+  morphology_sec: 2.5
+training:
+  batch_size: 64
+  num_workers: 8
+  epochs: 40
+  learning_rate: 0.0003
+  weight_decay: 1.0e-05
+  device: cuda
+  monitor_metric: cm_score
+  mode: finetune
+  num_classes: 24
+checkpoints:
+  save_dir: D:\ECG_SSL_KD\checkpoints
+  pretrained_ssl_teacher: D:/ECG_SSL_KD/checkpoints/ssl_20260707_014042/best_ssl_teacher.pth
+  best_teacher_finetuned: checkpoints/cinc2020_best_teacher_finetuned.pth
+  teacher_encoder: checkpoints/cinc2020_teacher_encoder.pth
+  classifier_head: checkpoints/cinc2020_classifier_head.pth

@@ -1,0 +1,21 @@
+# Teacher Fine-Tuning Config
+data:
+  data_dir: "D:\\Datasets\\PTBXL\\"
+  score_path: "D:\\Datasets\\PTBXL\\scp_statements.csv"
+  split: "0"
+
+training:
+  batch_size: 16
+  epochs: 50
+  learning_rate: 0.0003
+  weight_decay: 0.00001
+  device: "cuda"
+  mode: "frozen"  # "frozen" or "finetune"
+  num_classes: 5
+
+checkpoints:
+  save_dir: "checkpoints/"
+  pretrained_ssl_teacher: "checkpoints/ssl_20260617_210803/best_ssl_teacher.pth"
+  best_teacher_finetuned: "checkpoints/best_teacher_finetuned.pth"
+  teacher_encoder: "checkpoints/teacher_encoder.pth"
+  classifier_head: "checkpoints/classifier_head.pth"

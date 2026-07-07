@@ -1,0 +1,21 @@
+# Knowledge Distillation Config
+model:
+  teacher:
+    in_channels: 12
+    out_channels: 24
+  student:
+    in_channels: 6  # e.g., 6-lead student config
+    out_channels: 24
+
+training:
+  batch_size: 64
+  epochs: 50
+  learning_rate: 0.003
+  optimizer: adam
+  weight_decay: 0.00001
+  loss: BCEWithLogitsLoss
+  kd:
+    alpha: 0.2
+    temperature: 8.0
+    teacher1_weight: 0.7
+    teacher2_weight: 0.3

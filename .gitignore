@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch Checkpoints and Weights
+*.pth
+*.pt
+*.ckpt
+
+# Logs
+*.log
+pipeline_monitor.log
+
+# IDE and Environments
+.vscode/
+.idea/
+.env
+venv/
+env/
+
+# Ignored Folders
+zjunk/
+checkpoints/
+old checkpoints/
+deployment/
+checkpoints_kaggle/
