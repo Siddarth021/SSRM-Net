@@ -49,7 +49,7 @@ def load_cinc_signal(mat_file):
     return signal
 
 class CINC2020Dataset(Dataset):
-    def __init__(self, data_dir, split_df, test=False, transform=None, target_fs=257, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5):
+    def __init__(self, data_dir, split_df, test=False, transform=None, target_fs=257, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5, cache=True):
         """
         data_dir: Path to the dataset
         split_df: Pandas dataframe containing 'filename' column (path to record without extension)
@@ -62,6 +62,8 @@ class CINC2020Dataset(Dataset):
         self.lead2_sec = lead2_sec
         self.morphology_sec = morphology_sec
         self.data = split_df['filename'].tolist()
+        self.use_cache = cache
+        self.cache = {}
         
         # Load scored classes mapping
         mapping_path = os.path.join(data_dir, 'dx_mapping_scored.csv')
@@ -97,6 +99,9 @@ class CINC2020Dataset(Dataset):
         return label
 
     def __getitem__(self, item):
+        if self.use_cache and item in self.cache:
+            return self.cache[item]
+
         raw_path = self.data[item].replace('\\', '/')
         if 'training/' in raw_path:
             relative_path = raw_path[raw_path.find('training/'):]
@@ -149,7 +154,7 @@ class CINC2020Dataset(Dataset):
             morphology_tensor = morphology.float()
 
         if self.test:
-            return {
+            result = {
                 "lead2": lead2_tensor,
                 "morphology": morphology_tensor,
                 "filename": self.data[item]
@@ -157,12 +162,23 @@ class CINC2020Dataset(Dataset):
         else:
             label = self._get_multi_hot_label(diagnoses)
             label_tensor = torch.from_numpy(label).float()
-            return {
+            result = {
                 "lead2": lead2_tensor,
                 "morphology": morphology_tensor,
                 "label": label_tensor,
                 "filename": self.data[item]
             }
+
+        if self.use_cache:
+            self.cache[item] = {
+                "lead2": lead2_tensor.clone(),
+                "morphology": morphology_tensor.clone(),
+                "filename": self.data[item]
+            }
+            if not self.test:
+                self.cache[item]["label"] = label_tensor.clone()
+
+        return result
 
 class CINC2020ECG(object):
     def __init__(self, data_dir, split='0', target_fs=257, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5):
