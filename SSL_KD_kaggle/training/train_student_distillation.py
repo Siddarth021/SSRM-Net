@@ -21,6 +21,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.amp import GradScaler, autocast
 from tqdm import tqdm
 
 from SSL_KD.training.finetune_teacher import TeacherFineTuneModel
@@ -130,8 +131,8 @@ def main():
     log_print(f"Test samples: {len(test_ds)}")
 
     num_workers = config['training'].get('num_workers', 4)
-    train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers)
-    val_loader = DataLoader(val_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers)
+    train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=True)
+    val_loader = DataLoader(val_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=True)
 
     # 5. Training loop
     epochs = config['training']['epochs']
@@ -145,6 +146,7 @@ def main():
     start_epoch = 1
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scaler = GradScaler('cuda')
 
     if args.resume and os.path.exists(args.resume):
         log_print(f"Resuming training from: {args.resume}")
@@ -187,27 +189,30 @@ def main():
                 teacher_embedding = teacher_model.encoder(lead2, morphology)["embedding"]
                 teacher_logits = teacher_model.classifier(teacher_embedding)
             
-            # Forward pass student
-            student_outputs = student_model(lead2, morphology)
+            # Forward pass student with mixed precision
+            with autocast('cuda'):
+                student_outputs = student_model(lead2, morphology)
+                
+                if batch_idx == 0:
+                    log_print(f"  [Epoch {epoch} First Batch] teacher_embedding shape={teacher_embedding.shape}")
+                    log_print(f"  [Epoch {epoch} First Batch] student_projection shape={student_outputs['projected'].shape}")
+                    raw_mse = torch.nn.functional.mse_loss(student_outputs["projected"], teacher_embedding)
+                    log_print(f"  [Epoch {epoch} First Batch] raw_mse.item() = {raw_mse.item():.8f}")
+                
+                # Calculate distillation loss
+                loss_dict = distillation_criterion(
+                    student_outputs["logits"],
+                    student_outputs["projected"],
+                    teacher_logits,
+                    teacher_embedding,
+                    labels
+                )
+                
+                loss = loss_dict["loss"]
             
-            if batch_idx == 0:
-                log_print(f"  [Epoch {epoch} First Batch] teacher_embedding shape={teacher_embedding.shape}")
-                log_print(f"  [Epoch {epoch} First Batch] student_projection shape={student_outputs['projected'].shape}")
-                raw_mse = torch.nn.functional.mse_loss(student_outputs["projected"], teacher_embedding)
-                log_print(f"  [Epoch {epoch} First Batch] raw_mse.item() = {raw_mse.item():.8f}")
-            
-            # Calculate distillation loss
-            loss_dict = distillation_criterion(
-                student_outputs["logits"],
-                student_outputs["projected"],
-                teacher_logits,
-                teacher_embedding,
-                labels
-            )
-            
-            loss = loss_dict["loss"]
-            loss.backward()
-            optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             
             train_loss += loss.item() * lead2.size(0)
             train_bce += loss_dict["bce"].item() * lead2.size(0)
@@ -290,13 +295,14 @@ def main():
             torch.save(student_model.state_dict(), os.path.join(save_dir, "best_student_distilled.pth"))
             log_print(f"  --> Saved new best student model checkpoint ({monitor_metric}: {best_score:.4f})")
 
-        # Save latest state for resuming
+        # Save latest state for resuming (includes student weights and config)
         latest_state = {
             'epoch': epoch,
             'student_state_dict': student_model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict(),
-            'best_score': best_score
+            'best_score': best_score,
+            'config': config
         }
         torch.save(latest_state, os.path.join(run_dir, "checkpoint_latest.pth"))
 

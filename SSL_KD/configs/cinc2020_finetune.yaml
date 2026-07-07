@@ -19,7 +19,7 @@ training:
   num_classes: 24
 checkpoints:
   save_dir: D:\ECG_SSL_KD\checkpoints
-  pretrained_ssl_teacher: D:/ECG_SSL_KD/checkpoints/ssl_20260707_014042/best_ssl_teacher.pth
+  pretrained_ssl_teacher: D:/ECG_SSL_KD/checkpoints/ssl_20260707_162610/best_ssl_teacher.pth
   best_teacher_finetuned: checkpoints/cinc2020_best_teacher_finetuned.pth
   teacher_encoder: checkpoints/cinc2020_teacher_encoder.pth
   classifier_head: checkpoints/cinc2020_classifier_head.pth

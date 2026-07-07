@@ -16,13 +16,13 @@ import argparse
 import yaml
 
 from SSL_KD.evaluation.multilabel_metrics import compute_multilabel_metrics
-
 from SSL_KD.datasets.cinc2020_dataset import CINC2020ECG
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.amp import GradScaler, autocast
 from tqdm import tqdm
 
 from SSL_KD.training.finetune_teacher import TeacherFineTuneModel
@@ -185,9 +185,9 @@ def main():
         
         log_print("  -> Creating DataLoaders...")
         num_workers = config['training'].get('num_workers', 4)
-        train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers)
-        val_loader = DataLoader(val_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers)
-        test_loader = DataLoader(test_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers)
+        train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=True)
+        val_loader = DataLoader(val_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=True)
+        test_loader = DataLoader(test_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=True)
         log_print(f"Train loader batches: {len(train_loader)}")
         log_print(f"Val loader batches: {len(val_loader)}")
     except Exception as e:
@@ -219,6 +219,7 @@ def main():
     start_epoch = 1
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scaler = GradScaler('cuda')
 
     if args.resume and os.path.exists(args.resume):
         log_print(f"Resuming training from: {args.resume}")
@@ -250,11 +251,13 @@ def main():
             labels = batch["label"].to(device)
             
             optimizer.zero_grad()
-            logits = model(lead2, morphology)
-            loss = criterion(logits, labels)
+            with autocast('cuda'):
+                logits = model(lead2, morphology)
+                loss = criterion(logits, labels)
             
-            loss.backward()
-            optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             
             train_loss += loss.item() * lead2.size(0)
             train_pbar.set_postfix({'loss': f"{loss.item():.4f}"})
@@ -326,13 +329,14 @@ def main():
             torch.save(model.encoder.state_dict(), os.path.join(run_dir, "teacher_encoder.pth"))
             torch.save(model.classifier.state_dict(), os.path.join(run_dir, "classifier_head.pth"))
 
-        # Save latest state for resuming
+        # Save latest state for resuming (includes model weights and config)
         latest_state = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict(),
-            'best_score': best_score
+            'best_score': best_score,
+            'config': config
         }
         torch.save(latest_state, os.path.join(run_dir, "checkpoint_latest.pth"))
 

@@ -5,9 +5,8 @@ from torch.utils.data import Dataset
 import numpy as np
 import pandas as pd
 from scipy.io import loadmat
-from scipy.signal import resample
 from .transforms import (
-    Compose, Filtering, ZScore, NaNvalues, Normalize, RandomClip, Retype
+    Compose, Filtering, ZScore, NaNvalues, Normalize, RandomClip, Retype, Resample
 )
 
 # Standard CINC 2020 Equivalent Classes (27 scored classes merged into 24)
@@ -49,7 +48,7 @@ def load_cinc_signal(mat_file):
     return signal
 
 class CINC2020Dataset(Dataset):
-    def __init__(self, data_dir, split_df, test=False, transform=None, target_fs=257, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5, cache=True):
+    def __init__(self, data_dir, split_df, test=False, transform=None, target_fs=257, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5):
         """
         data_dir: Path to the dataset
         split_df: Pandas dataframe containing 'filename' column (path to record without extension)
@@ -62,8 +61,6 @@ class CINC2020Dataset(Dataset):
         self.lead2_sec = lead2_sec
         self.morphology_sec = morphology_sec
         self.data = split_df['filename'].tolist()
-        self.use_cache = cache
-        self.cache = {}
         
         # Load scored classes mapping
         mapping_path = os.path.join(data_dir, 'dx_mapping_scored.csv')
@@ -99,9 +96,6 @@ class CINC2020Dataset(Dataset):
         return label
 
     def __getitem__(self, item):
-        if self.use_cache and item in self.cache:
-            return self.cache[item]
-
         raw_path = self.data[item].replace('\\', '/')
         if 'training/' in raw_path:
             relative_path = raw_path[raw_path.find('training/'):]
@@ -121,10 +115,9 @@ class CINC2020Dataset(Dataset):
         # Load Signal
         signal = load_cinc_signal(mat_file)
         
-        # Resample to target_fs if necessary
+        # Resample to target_fs if necessary (using fast linear interpolation)
         if fs != self.target_fs:
-            num_samples = int(signal.shape[1] * self.target_fs / fs)
-            signal = resample(signal, num_samples, axis=1)
+            signal = Resample(signal, fs, self.target_fs)
             
         if self.transform:
             signal = self.transform(signal)
@@ -154,7 +147,7 @@ class CINC2020Dataset(Dataset):
             morphology_tensor = morphology.float()
 
         if self.test:
-            result = {
+            return {
                 "lead2": lead2_tensor,
                 "morphology": morphology_tensor,
                 "filename": self.data[item]
@@ -162,23 +155,71 @@ class CINC2020Dataset(Dataset):
         else:
             label = self._get_multi_hot_label(diagnoses)
             label_tensor = torch.from_numpy(label).float()
-            result = {
+            return {
                 "lead2": lead2_tensor,
                 "morphology": morphology_tensor,
                 "label": label_tensor,
                 "filename": self.data[item]
             }
 
-        if self.use_cache:
-            self.cache[item] = {
-                "lead2": lead2_tensor.clone(),
-                "morphology": morphology_tensor.clone(),
-                "filename": self.data[item]
+class PreprocessedCINC2020Dataset(Dataset):
+    """Fast dataset that loads pre-processed tensors from a single .pt file (no per-sample disk I/O)."""
+    def __init__(self, preproc_data, split_filenames, test=False, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5, target_fs=257):
+        self.test = test
+        self.seq_length = seq_length
+        self.lead2_sec = lead2_sec
+        self.morphology_sec = morphology_sec
+        self.target_fs = target_fs
+        
+        self.signals = preproc_data['signals']
+        self.labels = preproc_data['labels']
+        self.all_filenames = preproc_data['filenames']
+        self.fname_to_idx = preproc_data['fname_to_idx']
+        self.target_classes = preproc_data['target_classes']
+        self.num_classes = preproc_data['num_classes']
+        self.class_to_idx = preproc_data['class_to_idx']
+        
+        # Map split filenames to indices in the preprocessed tensors
+        self.indices = []
+        self.filenames = []
+        for fname in split_filenames:
+            if fname in self.fname_to_idx:
+                self.indices.append(self.fname_to_idx[fname])
+                self.filenames.append(fname)
+    
+    def __len__(self):
+        return len(self.indices)
+    
+    def __getitem__(self, item):
+        idx = self.indices[item]
+        signal = self.signals[idx]  # (12, seq_length) tensor, already preprocessed
+        
+        # Calculate exact number of samples for each branch
+        lead2_samples = min(int(self.lead2_sec * self.target_fs), self.seq_length)
+        morph_samples = min(int(self.morphology_sec * self.target_fs), self.seq_length)
+        
+        # Split leads: Lead II is at index 1
+        lead2_tensor = signal[1:2, :lead2_samples]
+        
+        # Remaining leads (I, III, aVR, aVL, aVF, V1-V6)
+        remaining_indices = [0] + list(range(2, 12))
+        morphology_tensor = signal[remaining_indices, :morph_samples]
+        
+        if self.test:
+            return {
+                "lead2": lead2_tensor,
+                "morphology": morphology_tensor,
+                "filename": self.filenames[item]
             }
-            if not self.test:
-                self.cache[item]["label"] = label_tensor.clone()
+        else:
+            label_tensor = self.labels[idx]
+            return {
+                "lead2": lead2_tensor,
+                "morphology": morphology_tensor,
+                "label": label_tensor,
+                "filename": self.filenames[item]
+            }
 
-        return result
 
 class CINC2020ECG(object):
     def __init__(self, data_dir, split='0', target_fs=257, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5):
@@ -220,6 +261,10 @@ class CINC2020ECG(object):
                 Retype()
             ])
         }
+        
+        # Check for preprocessed file
+        self.preproc_path = os.path.join(data_dir, 'preprocessed', f'cinc2020_12lead_{target_fs}hz_{seq_length}len.pt')
+        self._preproc_data = None
 
     def data_prepare(self, test=False):
         # Use the 5-fold cross validation splits from the '5folds' directory
@@ -234,7 +279,41 @@ class CINC2020ECG(object):
         train_df = pd.read_csv(train_path)
         test_df = pd.read_csv(test_path)
         
-        # LRH_Net uses 'test_splitX.csv' for validation. We will use it for both val and test datasets here.
+        # Try to use preprocessed data for instant loading
+        if os.path.exists(self.preproc_path):
+            print(f"Loading preprocessed dataset from: {self.preproc_path}")
+            if self._preproc_data is None:
+                self._preproc_data = torch.load(self.preproc_path, weights_only=False)
+            print(f"Preprocessed data loaded! ({self._preproc_data['signals'].shape[0]} records)")
+            
+            train_filenames = train_df['filename'].tolist()
+            test_filenames = test_df['filename'].tolist()
+            
+            train_dataset = PreprocessedCINC2020Dataset(
+                self._preproc_data, train_filenames,
+                seq_length=self.seq_length, lead2_sec=self.lead2_sec,
+                morphology_sec=self.morphology_sec, target_fs=self.target_fs
+            )
+            val_dataset = PreprocessedCINC2020Dataset(
+                self._preproc_data, test_filenames,
+                seq_length=self.seq_length, lead2_sec=self.lead2_sec,
+                morphology_sec=self.morphology_sec, target_fs=self.target_fs
+            )
+            test_dataset = PreprocessedCINC2020Dataset(
+                self._preproc_data, test_filenames, test=True,
+                seq_length=self.seq_length, lead2_sec=self.lead2_sec,
+                morphology_sec=self.morphology_sec, target_fs=self.target_fs
+            )
+            
+            # Store target_classes for downstream metric reporting
+            self.target_classes = self._preproc_data['target_classes']
+            
+            return train_dataset, val_dataset, test_dataset
+        
+        # Fallback: original per-file loading
+        print(f"No preprocessed file found at {self.preproc_path}. Using per-file loading (slow).")
+        print(f"Run 'python SSL_KD/datasets/preprocess_cinc2020.py' to preprocess for faster training.")
+        
         train_dataset = CINC2020Dataset(
             self.data_dir, train_df, transform=self.data_transforms['train'], 
             target_fs=self.target_fs, seq_length=self.seq_length,

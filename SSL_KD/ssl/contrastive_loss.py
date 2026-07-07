@@ -27,7 +27,7 @@ class NTXentLoss(nn.Module):
         # Positive keys are (z1_i, z2_i)
         # Create mask for self-similarities and populate target label
         mask = torch.eye(2 * batch_size, dtype=torch.bool, device=z1.device)
-        similarity_matrix = similarity_matrix.masked_fill(mask, -9e15)
+        similarity_matrix = similarity_matrix.masked_fill(mask, -1e4)
         
         # Target index labels: representation i's positive partner is at:
         # i + batch_size if i < batch_size else i - batch_size

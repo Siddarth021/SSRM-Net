@@ -10,7 +10,7 @@ data:
 training:
   batch_size: 64
   num_workers: 8
-  epochs: 50
+  epochs: 60
   learning_rate: 0.0005
   weight_decay: 1.0e-05
   device: cuda

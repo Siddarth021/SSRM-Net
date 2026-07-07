@@ -11,6 +11,7 @@ import yaml
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.amp import GradScaler, autocast
 from tqdm import tqdm
 
 from SSL_KD.models.teacher.teacher_model import TeacherModel
@@ -90,12 +91,13 @@ def main():
         LeadDropout(0.3)
     ])
     
-    loss_fn = NTXentLoss(temperature=config['ssl']['temperature'])
+    loss_fn = NTXentLoss(temperature=config['training']['temperature'])
     
     params = list(teacher.parameters()) + list(projection_head.parameters())
     optimizer = optim.Adam(params, lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
     
-    trainer = SSLTrainer(teacher, projection_head, augmentations, loss_fn, optimizer, device)
+    scaler = GradScaler('cuda')
+    trainer = SSLTrainer(teacher, projection_head, augmentations, loss_fn, optimizer, device, scaler=scaler)
     
     import time
     from datetime import datetime
@@ -159,7 +161,7 @@ def main():
     log_print(f"Label shape: {label_shape}")
     
     num_workers = config['training'].get('num_workers', 4)
-    train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers)
+    train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=True)
 
     best_loss = float('inf')
     epochs = config['training']['epochs']
@@ -205,13 +207,14 @@ def main():
             torch.save(teacher.state_dict(), os.path.join(run_dir, "best_ssl_teacher.pth"))
             torch.save(projection_head.state_dict(), os.path.join(run_dir, "best_projection_head.pth"))
             
-        # Save latest state for resuming
+        # Save latest state for resuming (includes weights and config)
         latest_state = {
             'epoch': epoch,
             'teacher_state_dict': teacher.state_dict(),
             'projection_head_state_dict': projection_head.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
-            'best_loss': best_loss
+            'best_loss': best_loss,
+            'config': config
         }
         torch.save(latest_state, os.path.join(run_dir, "checkpoint_latest.pth"))
 
