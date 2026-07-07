@@ -57,7 +57,7 @@ def main():
         with open(log_path, "a", encoding="utf-8") as lf:
             lf.write(msg + "\n")
         # Also append to the master pipeline log so user can monitor externally
-        master_log = r"/kaggle/working/pipeline_monitor.log"
+        master_log = os.path.join(os.path.dirname(save_dir), "pipeline_monitor.log")
         if os.path.exists(master_log) or not args.resume:
             with open(master_log, "a", encoding="utf-8") as ml:
                 ml.write(msg + "\n")

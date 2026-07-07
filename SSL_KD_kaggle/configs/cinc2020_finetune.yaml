@@ -1,25 +1,25 @@
-# Finetuning Config for PhysioNet 2020
 data:
-  dataset_name: "cinc2020"
+  dataset_name: cinc2020
   data_dir: "/kaggle/input/physionet-2020/"
   score_path: "/kaggle/input/physionet-2020/dx_mapping_scored.csv"
-  split: "0"
+  split: '0'
   target_fs: 257
   seq_length: 4096
   lead2_sec: 15.94
   morphology_sec: 2.5
-  num_classes: 24
-
 training:
-  batch_size: 32
+  batch_size: 256
   num_workers: 4
-  epochs: 40
+  epochs: 100
   learning_rate: 0.0003
-  weight_decay: 0.00001
-  device: "cuda"
-
+  weight_decay: 1.0e-05
+  device: cuda
+  monitor_metric: cm_score
+  mode: finetune
+  num_classes: 24
 checkpoints:
   save_dir: "/kaggle/working/checkpoints"
   pretrained_ssl_teacher: "/kaggle/working/checkpoints/best_ssl_teacher.pth"
-  best_teacher_finetuned: "checkpoints/cinc2020_best_teacher_finetuned.pth"
-  classifier_head: "checkpoints/cinc2020_classifier_head.pth"
+  best_teacher_finetuned: checkpoints/cinc2020_best_teacher_finetuned.pth
+  teacher_encoder: checkpoints/cinc2020_teacher_encoder.pth
+  classifier_head: checkpoints/cinc2020_classifier_head.pth

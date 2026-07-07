@@ -20,8 +20,8 @@ venv/
 env/
 
 # Ignored Folders
-zjunk/
+z_junk/
 checkpoints/
-old checkpoints/
+old_checkpoints/
 deployment/
 checkpoints_kaggle/

@@ -22,5 +22,5 @@ training:
   gamma: 0.2
 checkpoints:
   save_dir: D:\ECG_SSL_KD\checkpoints
-  teacher_checkpoint: D:/ECG_SSL_KD/checkpoints/finetune_20260707_082840/best_teacher_finetuned.pth
+  teacher_checkpoint: D:/ECG_SSL_KD/checkpoints/finetune_20260707_103620/best_teacher_finetuned.pth
   teacher_weights: D:/ECG_SSL_KD/checkpoints/finetune_20260707_082840/best_teacher_finetuned.pth

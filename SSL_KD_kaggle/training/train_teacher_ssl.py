@@ -90,7 +90,7 @@ def main():
         LeadDropout(0.3)
     ])
     
-    loss_fn = NTXentLoss(temperature=config['training']['temperature'])
+    loss_fn = NTXentLoss(temperature=config['ssl']['temperature'])
     
     params = list(teacher.parameters()) + list(projection_head.parameters())
     optimizer = optim.Adam(params, lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
@@ -114,7 +114,7 @@ def main():
         with open(log_path, "a") as lf:
             lf.write(msg + "\n")
         # Also append to the master pipeline log so user can monitor externally
-        master_log = r"/kaggle/working/pipeline_monitor.log"
+        master_log = os.path.join(os.path.dirname(save_dir), "pipeline_monitor.log")
         if os.path.exists(master_log) or not args.resume:
             with open(master_log, "a") as ml:
                 ml.write(msg + "\n")
