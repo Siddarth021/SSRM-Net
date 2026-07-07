@@ -91,7 +91,8 @@ def main():
         LeadDropout(0.3)
     ])
     
-    loss_fn = NTXentLoss(temperature=config['training']['temperature'])
+    temp_val = config.get('ssl', {}).get('temperature', config.get('training', {}).get('temperature', 0.1))
+    loss_fn = NTXentLoss(temperature=temp_val)
     
     params = list(teacher.parameters()) + list(projection_head.parameters())
     optimizer = optim.Adam(params, lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
