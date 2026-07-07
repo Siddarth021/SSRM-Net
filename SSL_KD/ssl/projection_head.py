@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class ProjectionHead(nn.Module):
-    def __init__(self, input_dim=256, hidden_dim=256, output_dim=128):
+    def __init__(self, input_dim=512, hidden_dim=512, output_dim=128):
         super(ProjectionHead, self).__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),

@@ -6,9 +6,9 @@ data:
   target_fs: 257
   seq_length: 4096
   lead2_sec: 15.94
-  morphology_sec: 2.5
+  morphology_sec: 15.94
 training:
-  batch_size: 256
+  batch_size: 128
   num_workers: 4
   epochs: 2
   learning_rate: 0.0005

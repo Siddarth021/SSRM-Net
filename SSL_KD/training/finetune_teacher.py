@@ -7,7 +7,7 @@ class TeacherFineTuneModel(nn.Module):
     def __init__(self, num_classes=5, mode='frozen'):
         super(TeacherFineTuneModel, self).__init__()
         self.encoder = TeacherModel()
-        self.classifier = ClassifierHead(embedding_dim=256, num_classes=num_classes)
+        self.classifier = ClassifierHead(embedding_dim=512, num_classes=num_classes)
         self.set_mode(mode)
 
     def set_mode(self, mode):

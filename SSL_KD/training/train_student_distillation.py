@@ -144,6 +144,8 @@ def main():
     best_metrics = {}
     start_epoch = 1
 
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
     if args.resume and os.path.exists(args.resume):
         log_print(f"Resuming training from: {args.resume}")
         checkpoint = torch.load(args.resume, map_location=device)
@@ -151,6 +153,10 @@ def main():
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         best_score = checkpoint.get('best_score', float('inf') if monitor_metric == 'val_loss' else -1.0)
+        if 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        else:
+            scheduler.last_epoch = start_epoch - 1
         # Override run_dir
         run_dir = os.path.dirname(args.resume)
         log_path = os.path.join(run_dir, "distill.log")
@@ -289,9 +295,13 @@ def main():
             'epoch': epoch,
             'student_state_dict': student_model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
             'best_score': best_score
         }
         torch.save(latest_state, os.path.join(run_dir, "checkpoint_latest.pth"))
+
+        # Step the learning rate scheduler
+        scheduler.step()
 
     log_print("\n=== Distillation Completed ===")
     log_print(f"Best Student Epoch: {best_epoch}")

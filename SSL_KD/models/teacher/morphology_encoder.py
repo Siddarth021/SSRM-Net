@@ -41,7 +41,7 @@ class MorphologyResidualBlock(nn.Module):
 
 
 class MorphologyEncoder(nn.Module):
-    def __init__(self, in_channels=11, out_channels=256):
+    def __init__(self, in_channels=11, out_channels=512):
         super(MorphologyEncoder, self).__init__()
         
         self.init_conv = nn.Sequential(
@@ -52,14 +52,15 @@ class MorphologyEncoder(nn.Module):
         
         self.blocks = nn.Sequential(
             MorphologyResidualBlock(64, 128, stride=2),   # length to 625
-            MorphologyResidualBlock(128, 256, stride=2)   # length to 313
+            MorphologyResidualBlock(128, 256, stride=2),   # length to 313
+            MorphologyResidualBlock(256, 512, stride=2)    # length to 157
         )
         
         # Lead/Channel Attention
         self.lead_attn = nn.Sequential(
-            nn.Linear(256, 64),
+            nn.Linear(512, 128),
             nn.ReLU(inplace=False),
-            nn.Linear(64, 256),
+            nn.Linear(128, 512),
             nn.Sigmoid()
         )
 

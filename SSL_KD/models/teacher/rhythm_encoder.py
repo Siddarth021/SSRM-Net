@@ -27,7 +27,7 @@ class RhythmResidualBlock(nn.Module):
 
 
 class RhythmEncoder(nn.Module):
-    def __init__(self, in_channels=1, out_channels=256):
+    def __init__(self, in_channels=1, out_channels=512):
         super(RhythmEncoder, self).__init__()
         
         self.init_conv = nn.Sequential(
@@ -39,19 +39,20 @@ class RhythmEncoder(nn.Module):
         self.res_blocks = nn.Sequential(
             RhythmResidualBlock(64, 64, stride=1),
             RhythmResidualBlock(64, 128, stride=2),
-            RhythmResidualBlock(128, 128, stride=1)
+            RhythmResidualBlock(128, 256, stride=2),
+            RhythmResidualBlock(256, 256, stride=1)
         )
         
-        # BiLSTM input_size is 128 (channels from last res block), hidden_size is 128.
-        # Since it is bidirectional, the output size is 128 * 2 = 256.
-        self.lstm = nn.LSTM(input_size=128, hidden_size=128, num_layers=1, 
+        # BiLSTM input_size is 256 (channels from last res block), hidden_size is 256.
+        # Since it is bidirectional, the output size is 256 * 2 = 512.
+        self.lstm = nn.LSTM(input_size=256, hidden_size=256, num_layers=1, 
                             batch_first=True, bidirectional=True)
         
         # Temporal Attention
         self.attention = nn.Sequential(
-            nn.Linear(256, 64),
+            nn.Linear(512, 128),
             nn.Tanh(),
-            nn.Linear(64, 1, bias=False)
+            nn.Linear(128, 1, bias=False)
         )
 
     def forward(self, x):

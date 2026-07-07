@@ -5,7 +5,7 @@ from .morphology_encoder import MorphologyEncoder
 from .fusion import FusionModule
 
 class TeacherModel(nn.Module):
-    def __init__(self, rhythm_dim=256, morph_dim=256, fused_dim=256):
+    def __init__(self, rhythm_dim=512, morph_dim=512, fused_dim=512):
         super(TeacherModel, self).__init__()
         
         self.rhythm_encoder = RhythmEncoder(in_channels=1, out_channels=rhythm_dim)

@@ -21,8 +21,8 @@ class StudentModel(nn.Module):
             nn.Dropout(p=0.2)
         )
         
-        # Projection layer to match Teacher's 256-d embedding space for feature distillation
-        self.projection = nn.Linear(64, 256)
+        # Projection layer to match Teacher's 512-d embedding space for feature distillation
+        self.projection = nn.Linear(64, 512)
         
         # Classifier Head for downstream classification
         self.classifier = nn.Linear(64, num_classes)

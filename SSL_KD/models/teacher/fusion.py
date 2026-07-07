@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class FusionModule(nn.Module):
-    def __init__(self, feature_dim=256, dropout_prob=0.2):
+    def __init__(self, feature_dim=512, dropout_prob=0.2):
         super(FusionModule, self).__init__()
         self.mlp = nn.Sequential(
             nn.Linear(feature_dim * 2, 512),
