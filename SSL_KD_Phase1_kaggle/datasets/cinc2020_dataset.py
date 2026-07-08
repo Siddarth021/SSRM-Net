@@ -132,7 +132,7 @@ class CINC2020Dataset(Dataset):
         mat_file = record_path + '.mat'
         
         # Load Header
-        fs, diagnoses = load_cinc_header(hea_file)
+        fs, diagnoses, age, gender = load_cinc_header(hea_file)
         
         # Load Signal
         signal = load_cinc_signal(mat_file)
@@ -167,8 +167,7 @@ class CINC2020Dataset(Dataset):
             morphology_tensor = torch.from_numpy(morphology).float()
         else:
             morphology_tensor = morphology.float()
-        hea_file = record_path + '.hea'
-        fs, diagnoses, age, gender = load_cinc_header(hea_file)
+
         ag_feats = get_age_gender_features(age, gender)
         ag_tensor = torch.from_numpy(ag_feats).float()
 
