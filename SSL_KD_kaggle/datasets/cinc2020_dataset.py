@@ -262,8 +262,19 @@ class CINC2020ECG(object):
             ])
         }
         
-        # Check for preprocessed file
-        self.preproc_path = os.path.join(data_dir, 'preprocessed', f'cinc2020_12lead_{target_fs}hz_{seq_length}len.pt')
+        # Check for preprocessed file (both in data_dir and writeable fallbacks like /kaggle/working)
+        preproc_filename = f'cinc2020_12lead_{target_fs}hz_{seq_length}len.pt'
+        self.preproc_path = os.path.join(data_dir, 'preprocessed', preproc_filename)
+        
+        fallbacks = [
+            os.path.join('/kaggle/working/preprocessed', preproc_filename),
+            os.path.join('./preprocessed', preproc_filename),
+            os.path.join('preprocessed', preproc_filename)
+        ]
+        for path in fallbacks:
+            if not os.path.exists(self.preproc_path) and os.path.exists(path):
+                self.preproc_path = path
+                break
         self._preproc_data = None
 
     def data_prepare(self, test=False):
