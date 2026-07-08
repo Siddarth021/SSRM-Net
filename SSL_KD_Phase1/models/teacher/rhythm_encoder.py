@@ -65,9 +65,14 @@ class RhythmEncoder(nn.Module):
         
         # Prepare for LSTM: (B, L, C)
         out = out.transpose(1, 2)  # (B, 1250, 128)
-        # Force LSTM to run in float32 to avoid cuDNN mixed precision issues on some GPUs
+        # Force LSTM to run in float32 and disable cuDNN specifically for this LSTM layer
+        # to avoid CUDNN_STATUS_EXECUTION_FAILED_CUBLAS crashes on some GPUs/drivers
+        prev_cudnn = torch.backends.cudnn.enabled
+        torch.backends.cudnn.enabled = False
         with torch.amp.autocast('cuda', enabled=False):
             lstm_out, _ = self.lstm(out.float())
+        torch.backends.cudnn.enabled = prev_cudnn
+        
         # Cast back to the current default dtype (FP16 if in autocast)
         lstm_out = lstm_out.to(x.dtype)
         
