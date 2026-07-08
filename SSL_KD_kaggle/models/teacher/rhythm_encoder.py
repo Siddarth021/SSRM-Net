@@ -61,7 +61,11 @@ class RhythmEncoder(nn.Module):
         
         # Prepare for LSTM: (B, L, C)
         out = out.transpose(1, 2)  # (B, 1250, 128)
-        lstm_out, _ = self.lstm(out)  # (B, 1250, 256)
+        # Force LSTM to run in float32 to avoid cuDNN mixed precision issues on some GPUs
+        with torch.amp.autocast('cuda', enabled=False):
+            lstm_out, _ = self.lstm(out.float())
+        # Cast back to the current default dtype (FP16 if in autocast)
+        lstm_out = lstm_out.to(x.dtype)
         
         # Attention pooling
         attn_weights = self.attention(lstm_out)  # (B, 1250, 1)
