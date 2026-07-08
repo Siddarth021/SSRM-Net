@@ -1,0 +1,25 @@
+data:
+  dataset_name: cinc2020
+  data_dir: "/kaggle/input/datasets/gundetisiddarth/physionet-2020/phsionet_2020/"
+  score_path: "/kaggle/input/datasets/gundetisiddarth/physionet-2020/phsionet_2020/dx_mapping_scored.csv"
+  split: '0'
+  target_fs: 257
+  seq_length: 4096
+  lead2_sec: 15.94
+  morphology_sec: 15.94
+training:
+  batch_size: 128
+  num_workers: 4
+  epochs: 90
+  learning_rate: 0.0003
+  weight_decay: 1.0e-05
+  device: cuda
+  monitor_metric: cm_score
+  mode: finetune
+  num_classes: 24
+checkpoints:
+  save_dir: "/kaggle/working/checkpoints"
+  pretrained_ssl_teacher: "/kaggle/working/checkpoints/best_ssl_teacher.pth"
+  best_teacher_finetuned: checkpoints/cinc2020_best_teacher_finetuned.pth
+  teacher_encoder: checkpoints/cinc2020_teacher_encoder.pth
+  classifier_head: checkpoints/cinc2020_classifier_head.pth

@@ -1,0 +1,391 @@
+import os
+import torch
+import torch.nn.functional as F
+from torch.utils.data import Dataset
+import numpy as np
+import pandas as pd
+from scipy.io import loadmat
+from .transforms import (
+    Compose, Filtering, ZScore, NaNvalues, Normalize, RandomClip, Retype, Resample
+)
+
+# Standard CINC 2020 Equivalent Classes (27 scored classes merged into 24)
+EQUIVALENT_CLASSES = {
+    "713427006": "59118001",  # CRBBB -> RBBB
+    "284470004": "63593006",  # PAC -> SVPB
+    "427172004": "17338001"   # PVC -> VPB
+}
+
+def load_cinc_header(header_file):
+    """Parses a PhysioNet .hea file to extract SNOMED CT codes and sampling frequency, age, and sex."""
+    with open(header_file, 'r') as f:
+        lines = f.readlines()
+    
+    # Extract sampling frequency from the first line
+    header_info = lines[0].strip().split()
+    fs = int(header_info[2])
+    
+    diagnoses = []
+    age = 60.0 # Default age
+    gender = 'Unknown'
+    
+    for line in lines:
+        if '#Dx:' in line.replace(' ', ''):
+            dx_str = line.split('Dx:')[1].strip()
+            codes = dx_str.split(',')
+            for code in codes:
+                code = code.strip()
+                if code:
+                    diagnoses.append(code)
+        elif line.startswith('# Age:'):
+            age_str = line.split(':')[1].strip()
+            if age_str != 'NaN' and age_str != 'Unknown':
+                try:
+                    age = float(age_str)
+                except ValueError:
+                    pass
+        elif line.startswith('# Sex:'):
+            gender_str = line.split(':')[1].strip()
+            if gender_str in ['Male', 'Female']:
+                gender = gender_str
+            
+    return fs, diagnoses, age, gender
+
+def get_age_gender_features(age, gender):
+    # Encode as [age_normalized, is_male, is_female, is_unknown, is_age_nan (0)]
+    feats = np.zeros(5, dtype=np.float32)
+    feats[0] = age / 100.0
+    if gender == 'Male':
+        feats[1] = 1.0
+    elif gender == 'Female':
+        feats[2] = 1.0
+    else:
+        feats[3] = 1.0
+    return feats
+
+def load_cinc_signal(mat_file):
+    """Loads the .mat signal file."""
+    x = loadmat(mat_file)
+    signal = np.asarray(x['val'], dtype=np.float64)
+    return signal
+
+class CINC2020Dataset(Dataset):
+    def __init__(self, data_dir, split_df, test=False, transform=None, target_fs=257, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5):
+        """
+        data_dir: Path to the dataset
+        split_df: Pandas dataframe containing 'filename' column (path to record without extension)
+        """
+        self.data_dir = data_dir
+        self.test = test
+        self.transform = transform
+        self.target_fs = target_fs
+        self.seq_length = seq_length
+        self.lead2_sec = lead2_sec
+        self.morphology_sec = morphology_sec
+        self.data = split_df['filename'].tolist()
+        
+        # Load scored classes mapping
+        mapping_path = os.path.join(data_dir, 'dx_mapping_scored.csv')
+        if not os.path.exists(mapping_path):
+            raise FileNotFoundError(f"Missing {mapping_path}. Please ensure CINC 2020 dataset is properly formatted.")
+            
+        dx_df = pd.read_csv(mapping_path)
+        self.scored_classes = dx_df['SNOMED CT Code'].astype(str).tolist()
+        
+        # Apply equivalencies to find the unique 24 classes
+        mapped_classes = set()
+        for code in self.scored_classes:
+            mapped_classes.add(EQUIVALENT_CLASSES.get(code, code))
+        
+        self.target_classes = sorted(list(mapped_classes))
+        self.num_classes = len(self.target_classes)
+        
+        if self.num_classes != 24:
+            print(f"Warning: Expected 24 classes after merging, but got {self.num_classes}")
+            
+        self.class_to_idx = {str(code): i for i, code in enumerate(self.target_classes)}
+
+    def __len__(self):
+        return len(self.data)
+
+    def _get_multi_hot_label(self, diagnoses):
+        label = np.zeros(self.num_classes, dtype=np.float32)
+        for dx in diagnoses:
+            # Apply equivalency mapping
+            mapped_dx = EQUIVALENT_CLASSES.get(dx, dx)
+            if mapped_dx in self.class_to_idx:
+                label[self.class_to_idx[mapped_dx]] = 1.0
+        return label
+
+    def __getitem__(self, item):
+        raw_path = self.data[item].replace('\\', '/')
+        if 'training/' in raw_path:
+            relative_path = raw_path[raw_path.find('training/'):]
+        else:
+            relative_path = raw_path
+            
+        record_path = os.path.join(self.data_dir, relative_path)
+        if record_path.endswith('.mat'):
+            record_path = record_path[:-4]
+        
+        hea_file = record_path + '.hea'
+        mat_file = record_path + '.mat'
+        
+        # Load Header
+        fs, diagnoses = load_cinc_header(hea_file)
+        
+        # Load Signal
+        signal = load_cinc_signal(mat_file)
+        
+        # Resample to target_fs if necessary (using fast linear interpolation)
+        if fs != self.target_fs:
+            signal = Resample(signal, fs, self.target_fs)
+            
+        if self.transform:
+            signal = self.transform(signal)
+
+        # Calculate exact number of samples for each branch
+        lead2_samples = min(int(self.lead2_sec * self.target_fs), self.seq_length)
+        morph_samples = min(int(self.morphology_sec * self.target_fs), self.seq_length)
+
+        # Split leads
+        # Standard CINC 2020 leads: I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6
+        # Lead II is at index 1
+        lead2 = signal[1:2, :lead2_samples]
+        
+        # Remaining leads
+        remaining_indices = [0] + list(range(2, 12))
+        morphology = signal[remaining_indices, :morph_samples]
+
+        # Convert to PyTorch tensors
+        if not isinstance(lead2, torch.Tensor):
+            lead2_tensor = torch.from_numpy(lead2).float()
+        else:
+            lead2_tensor = lead2.float()
+
+        if not isinstance(morphology, torch.Tensor):
+            morphology_tensor = torch.from_numpy(morphology).float()
+        else:
+            morphology_tensor = morphology.float()
+        hea_file = record_path + '.hea'
+        fs, diagnoses, age, gender = load_cinc_header(hea_file)
+        ag_feats = get_age_gender_features(age, gender)
+        ag_tensor = torch.from_numpy(ag_feats).float()
+
+        if self.test:
+            return {
+                "lead2": lead2_tensor,
+                "morphology": morphology_tensor,
+                "age_gender": ag_tensor,
+                "filename": self.data[item]
+            }
+        else:
+            label = self._get_multi_hot_label(diagnoses)
+            label_tensor = torch.from_numpy(label).float()
+            return {
+                "lead2": lead2_tensor,
+                "morphology": morphology_tensor,
+                "age_gender": ag_tensor,
+                "label": label_tensor,
+                "filename": self.data[item]
+            }
+
+class PreprocessedCINC2020Dataset(Dataset):
+    """Fast dataset that loads pre-processed tensors from a single .pt file (no per-sample disk I/O)."""
+    def __init__(self, preproc_data, split_filenames, test=False, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5, target_fs=257):
+        self.test = test
+        self.seq_length = seq_length
+        self.lead2_sec = lead2_sec
+        self.morphology_sec = morphology_sec
+        self.target_fs = target_fs
+        self.data_dir = "D:\\Datasets\\phsionet_2020\\" # Default fallback
+        
+        self.signals = preproc_data['signals']
+        self.labels = preproc_data['labels']
+        self.all_filenames = preproc_data['filenames']
+        self.fname_to_idx = preproc_data['fname_to_idx']
+        self.target_classes = preproc_data['target_classes']
+        self.num_classes = preproc_data['num_classes']
+        self.class_to_idx = preproc_data['class_to_idx']
+        
+        # Map split filenames to indices in the preprocessed tensors
+        self.indices = []
+        self.filenames = []
+        for fname in split_filenames:
+            if fname in self.fname_to_idx:
+                self.indices.append(self.fname_to_idx[fname])
+                self.filenames.append(fname)
+    
+    def __len__(self):
+        return len(self.indices)
+    
+    def __getitem__(self, item):
+        idx = self.indices[item]
+        signal = self.signals[idx]  # (12, seq_length) tensor, already preprocessed
+        
+        # Calculate exact number of samples for each branch
+        lead2_samples = min(int(self.lead2_sec * self.target_fs), self.seq_length)
+        morph_samples = min(int(self.morphology_sec * self.target_fs), self.seq_length)
+        
+        # Split leads: Lead II is at index 1
+        lead2_tensor = signal[1:2, :lead2_samples]
+        
+        # Remaining leads (I, III, aVR, aVL, aVF, V1-V6)
+        remaining_indices = [0] + list(range(2, 12))
+        morphology_tensor = signal[remaining_indices, :morph_samples]
+        
+        # Extract age/gender on the fly from the .hea file
+        import os
+        # Need to reconstruct the path to the header file
+        # The filename in self.filenames might be relative like 'g1/A0001'
+        data_dir = self.data_dir if hasattr(self, 'data_dir') else "D:\\Datasets\\phsionet_2020\\"
+        hea_file = os.path.join(data_dir, self.filenames[item] + ".hea")
+        
+        # Default features if file missing
+        ag_feats = np.zeros(5, dtype=np.float32)
+        if os.path.exists(hea_file):
+            _, _, age, gender = load_cinc_header(hea_file)
+            ag_feats = get_age_gender_features(age, gender)
+            
+        ag_tensor = torch.from_numpy(ag_feats).float()
+        
+        if self.test:
+            return {
+                "lead2": lead2_tensor,
+                "morphology": morphology_tensor,
+                "age_gender": ag_tensor,
+                "filename": self.filenames[item]
+            }
+        else:
+            label_tensor = self.labels[idx]
+            return {
+                "lead2": lead2_tensor,
+                "morphology": morphology_tensor,
+                "age_gender": ag_tensor,
+                "label": label_tensor,
+                "filename": self.filenames[item]
+            }
+
+
+class CINC2020ECG(object):
+    def __init__(self, data_dir, split='0', target_fs=257, seq_length=4096, lead2_sec=15.9, morphology_sec=2.5):
+        self.data_dir = data_dir
+        self.split = split
+        self.target_fs = target_fs
+        self.seq_length = seq_length
+        self.lead2_sec = lead2_sec
+        self.morphology_sec = morphology_sec
+        
+        # We assume 24 classes for CINC 2020
+        self.num_classes = 24
+
+        normlizetype = 'mean-std'
+        
+        self.data_transforms = {
+            'train': Compose([
+                Filtering(),
+                ZScore(),
+                NaNvalues(),
+                Normalize(normlizetype),
+                RandomClip(len=self.seq_length),
+                Retype()
+            ]),
+            'val': Compose([
+                Filtering(),
+                ZScore(),
+                NaNvalues(),
+                Normalize(normlizetype),
+                RandomClip(len=self.seq_length),
+                Retype()
+            ]),
+            'test': Compose([
+                Filtering(),
+                ZScore(),
+                NaNvalues(),
+                Normalize(normlizetype),
+                RandomClip(len=self.seq_length),
+                Retype()
+            ])
+        }
+        
+        # Check for preprocessed file (both in data_dir and writeable fallbacks like /kaggle/working)
+        preproc_filename = f'cinc2020_12lead_{target_fs}hz_{seq_length}len.pt'
+        self.preproc_path = os.path.join(data_dir, 'preprocessed', preproc_filename)
+        
+        fallbacks = [
+            os.path.join('/kaggle/working/preprocessed', preproc_filename),
+            os.path.join('./preprocessed', preproc_filename),
+            os.path.join('preprocessed', preproc_filename)
+        ]
+        for path in fallbacks:
+            if not os.path.exists(self.preproc_path) and os.path.exists(path):
+                self.preproc_path = path
+                break
+        self._preproc_data = None
+
+    def data_prepare(self, test=False):
+        # Use the 5-fold cross validation splits from the '5folds' directory
+        folds_dir = os.path.join(self.data_dir, '5folds')
+        
+        train_path = os.path.join(folds_dir, f'train_split{self.split}.csv')
+        test_path = os.path.join(folds_dir, f'test_split{self.split}.csv')
+        
+        if not os.path.exists(train_path) or not os.path.exists(test_path):
+            raise FileNotFoundError(f"Missing fold files for split {self.split}. Expected {train_path} and {test_path}")
+            
+        train_df = pd.read_csv(train_path)
+        test_df = pd.read_csv(test_path)
+        
+        # Try to use preprocessed data for instant loading
+        if os.path.exists(self.preproc_path):
+            print(f"Loading preprocessed dataset from: {self.preproc_path}")
+            if self._preproc_data is None:
+                self._preproc_data = torch.load(self.preproc_path, weights_only=False)
+            print(f"Preprocessed data loaded! ({self._preproc_data['signals'].shape[0]} records)")
+            
+            train_filenames = train_df['filename'].tolist()
+            test_filenames = test_df['filename'].tolist()
+            
+            train_dataset = PreprocessedCINC2020Dataset(
+                self._preproc_data, train_filenames,
+                seq_length=self.seq_length, lead2_sec=self.lead2_sec,
+                morphology_sec=self.morphology_sec, target_fs=self.target_fs
+            )
+            val_dataset = PreprocessedCINC2020Dataset(
+                self._preproc_data, test_filenames,
+                seq_length=self.seq_length, lead2_sec=self.lead2_sec,
+                morphology_sec=self.morphology_sec, target_fs=self.target_fs
+            )
+            test_dataset = PreprocessedCINC2020Dataset(
+                self._preproc_data, test_filenames, test=True,
+                seq_length=self.seq_length, lead2_sec=self.lead2_sec,
+                morphology_sec=self.morphology_sec, target_fs=self.target_fs
+            )
+            
+            # Store target_classes for downstream metric reporting
+            self.target_classes = self._preproc_data['target_classes']
+            
+            return train_dataset, val_dataset, test_dataset
+        
+        # Fallback: original per-file loading
+        print(f"No preprocessed file found at {self.preproc_path}. Using per-file loading (slow).")
+        print(f"Run 'python SSL_KD/datasets/preprocess_cinc2020.py' to preprocess for faster training.")
+        
+        train_dataset = CINC2020Dataset(
+            self.data_dir, train_df, transform=self.data_transforms['train'], 
+            target_fs=self.target_fs, seq_length=self.seq_length,
+            lead2_sec=self.lead2_sec, morphology_sec=self.morphology_sec
+        )
+        val_dataset = CINC2020Dataset(
+            self.data_dir, test_df, transform=self.data_transforms['val'], 
+            target_fs=self.target_fs, seq_length=self.seq_length,
+            lead2_sec=self.lead2_sec, morphology_sec=self.morphology_sec
+        )
+        test_dataset = CINC2020Dataset(
+            self.data_dir, test_df, transform=self.data_transforms['test'], 
+            target_fs=self.target_fs, seq_length=self.seq_length,
+            lead2_sec=self.lead2_sec, morphology_sec=self.morphology_sec
+        )
+        
+        return train_dataset, val_dataset, test_dataset
+
