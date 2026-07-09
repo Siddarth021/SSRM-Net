@@ -136,9 +136,10 @@ def main():
         for batch in tqdm(val_loader, desc="Evaluation"):
             lead2 = batch["lead2"].to(device)
             morphology = batch["morphology"].to(device)
+            age_gender = batch["age_gender"].to(device)
             labels = batch["label"].to(device)
             
-            logits = model(lead2, morphology)
+            logits = model(lead2, morphology, age_gender)
             probs = torch.sigmoid(logits)
             
             all_probs.append(probs.cpu().numpy())
