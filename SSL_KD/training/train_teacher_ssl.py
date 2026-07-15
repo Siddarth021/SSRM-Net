@@ -162,7 +162,7 @@ def main():
     log_print(f"Label shape: {label_shape}")
     
     num_workers = config['training'].get('num_workers', 4)
-    train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=True)
+    train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=(num_workers > 0))
 
     best_loss = float('inf')
     epochs = config['training']['epochs']

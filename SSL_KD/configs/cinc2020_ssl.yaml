@@ -11,7 +11,7 @@ data:
 
 training:
   batch_size: 32
-  num_workers: 8
+  num_workers: 0
   epochs: 120
   learning_rate: 0.0003
   weight_decay: 0.00001

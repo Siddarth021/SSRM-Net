@@ -131,8 +131,8 @@ def main():
     log_print(f"Test samples: {len(test_ds)}")
 
     num_workers = config['training'].get('num_workers', 4)
-    train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=True)
-    val_loader = DataLoader(val_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=True)
+    train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=(num_workers > 0))
+    val_loader = DataLoader(val_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=(num_workers > 0))
 
     # 5. Training loop
     epochs = config['training']['epochs']

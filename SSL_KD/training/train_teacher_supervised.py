@@ -186,9 +186,9 @@ def main():
         
         log_print("  -> Creating DataLoaders...")
         num_workers = config['training'].get('num_workers', 4)
-        train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=True)
-        val_loader = DataLoader(val_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=True)
-        test_loader = DataLoader(test_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=True)
+        train_loader = DataLoader(train_ds, batch_size=config['training']['batch_size'], shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=(num_workers > 0))
+        val_loader = DataLoader(val_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=(num_workers > 0))
+        test_loader = DataLoader(test_ds, batch_size=config['training']['batch_size'], shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=(num_workers > 0))
         log_print(f"Train loader batches: {len(train_loader)}")
         log_print(f"Val loader batches: {len(val_loader)}")
     except Exception as e:
